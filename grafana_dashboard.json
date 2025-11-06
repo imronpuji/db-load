@@ -1,0 +1,31 @@
+{
+  "title": "DB Load Test Overview",
+  "panels": [
+    {
+      "type": "graph",
+      "title": "Latency (seconds)",
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum(rate(db_request_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(db_request_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(db_request_latency_seconds_bucket[1m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "QPS",
+      "targets": [
+        { "expr": "db_qps", "legendFormat": "qps" }
+      ]
+    },
+    {
+      "type": "graph",
+      "title": "Requests",
+      "targets": [
+        { "expr": "sum(increase(db_requests_total{status=\"success\"}[1m]))", "legendFormat": "success" },
+        { "expr": "sum(increase(db_requests_total{status=\"error\"}[1m]))", "legendFormat": "error" }
+      ]
+    }
+  ]
+}
+
+

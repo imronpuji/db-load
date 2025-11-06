@@ -1,0 +1,56 @@
+database:
+  # Prefer environment variable DATABASE_URL; falls back to this value if not set
+  url: "postgres://dbmasteruser:%7DkMAR0f%3BYEKFFU-HX%3C6eI%29xkrr%3CAy9%7BT@ls-96753746ec760974bf7b12e9cb6961a024ca5db8.c1q0aaumeks6.ap-southeast-1.rds.amazonaws.com:5432/staging_tiketbersama"
+  min_pool: 10
+  max_pool: 200
+  statement_timeout_ms: 15000
+
+workload:
+  default_scenario: ramp-up
+  duration_sec: 600
+  ramp_up:
+    start_connections: 100
+    end_connections: 10000
+    duration_sec: 300
+  sustained:
+    connections: 10000
+    duration_sec: 600
+  spike:
+    base_connections: 2000
+    spike_connections: 8000
+    spike_duration_sec: 60
+    cycles: 5
+  stress:
+    start_connections: 5000
+    step: 2000
+    max_connections: 20000
+    step_duration_sec: 60
+
+queries:
+  # We will auto-detect tables, prefer names containing 'event' or 'product'
+  simple_weight: 0.7
+  complex_weight: 0.3
+  simple:
+    # Examples executed depending on discovered schema
+    - type: select_by_id
+      limit: 1
+    - type: select_recent
+      order_by: created_at
+      limit: 1
+  complex:
+    - type: aggregate
+      ops: [count, max]
+    - type: filter_scan
+      limit: 50
+
+metrics:
+  enable_prometheus: true
+  prometheus_port: 9100  # Metrics exporter port (Prometheus will scrape from here)
+  report_json: "reports/summary.json"
+  report_csv: "reports/summary.csv"
+  update_interval_sec: 2
+
+logging:
+  level: INFO
+
+

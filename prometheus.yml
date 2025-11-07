@@ -5,7 +5,7 @@ global:
 scrape_configs:
   - job_name: 'db-load-test'
     static_configs:
-      - targets: ['localhost:9100']  # Script exports metrics here
+      - targets: ['localhost:9200']  # Script exports metrics here
         labels:
           instance: 'db-load-test'
 

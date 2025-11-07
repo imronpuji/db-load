@@ -45,30 +45,57 @@ async def spike(
     cycles: int,
     worker: QueryTask,
 ) -> None:
-    # Start base load once - keep running throughout all cycles
-    base_tasks = [asyncio.create_task(worker(i)) for i in range(base_connections)]
+    # Create a more aggressive worker for spike scenarios
+    async def spike_worker(idx: int) -> None:
+        # Run continuously until cancelled
+        error_count = 0
+        max_errors = 5  # Stop after too many consecutive errors
+        
+        while error_count < max_errors:
+            try:
+                await worker(idx)
+                error_count = 0  # Reset on success
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                error_count += 1
+                await asyncio.sleep(0.5)  # Longer delay on error
+                continue
+            await asyncio.sleep(0.1)  # Slightly longer delay between iterations
     
-    for cycle in range(cycles):
-        await asyncio.sleep(1)  # Small delay before spike
-        
-        # Spike - add extra connections
-        spike_tasks = [asyncio.create_task(worker(base_connections + cycle * spike_connections + i)) for i in range(spike_connections)]
-        
-        # Let spike run for the duration
-        await asyncio.sleep(spike_duration_sec)
-        
-        # Cancel spike tasks, but let base tasks continue
-        for t in spike_tasks:
+    # Start base load - keep running throughout all cycles
+    base_tasks = [asyncio.create_task(spike_worker(i)) for i in range(base_connections)]
+    
+    try:
+        for cycle in range(cycles):
+            print(f"[Spike] Cycle {cycle + 1}/{cycles}: Base load running with {base_connections} connections")
+            await asyncio.sleep(2)  # Brief stable period
+            
+            # Spike - add extra connections
+            print(f"[Spike] Adding spike of {spike_connections} connections for {spike_duration_sec}s")
+            spike_tasks = [
+                asyncio.create_task(spike_worker(base_connections + cycle * spike_connections + i)) 
+                for i in range(spike_connections)
+            ]
+            
+            # Let spike run for the duration
+            await asyncio.sleep(spike_duration_sec)
+            
+            # Cancel spike tasks
+            print(f"[Spike] Removing spike connections")
+            for t in spike_tasks:
+                t.cancel()
+            await asyncio.gather(*spike_tasks, return_exceptions=True)
+            
+            # Shorter recovery period
+            if cycle < cycles - 1:
+                print(f"[Spike] Recovery period (2s)")
+                await asyncio.sleep(2)
+    finally:
+        # Clean up base tasks
+        for t in base_tasks:
             t.cancel()
-        # Wait for spike tasks to finish canceling
-        await asyncio.gather(*spike_tasks, return_exceptions=True)
-        
-        # Wait a bit before next cycle (recovery period)
-        if cycle < cycles - 1:
-            await asyncio.sleep(5)
-    
-    # Wait for base tasks to complete
-    await asyncio.gather(*base_tasks, return_exceptions=True)
+        await asyncio.gather(*base_tasks, return_exceptions=True)
 
 
 async def stress(
@@ -78,14 +105,50 @@ async def stress(
     step_duration_sec: int,
     worker: QueryTask,
 ) -> None:
+    # Create a more aggressive worker for stress test
+    async def stress_worker(idx: int) -> None:
+        # Run continuously until cancelled
+        error_count = 0
+        max_errors = 5  # Stop after too many consecutive errors
+        
+        while error_count < max_errors:
+            try:
+                await worker(idx)
+                error_count = 0  # Reset on success
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                error_count += 1
+                await asyncio.sleep(0.5)  # Longer delay on error
+                continue
+            await asyncio.sleep(0.1)  # Slightly longer delay between iterations
+    
     current = start_connections
-    while current <= max_connections:
-        tasks = [asyncio.create_task(worker(i)) for i in range(current)]
-        await asyncio.sleep(step_duration_sec)
+    tasks = []
+    
+    try:
+        while current <= max_connections:
+            print(f"[Stress] Increasing load to {current} connections for {step_duration_sec}s")
+            
+            # Cancel old tasks first
+            for t in tasks:
+                t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Create new tasks for current level
+            tasks = [asyncio.create_task(stress_worker(i)) for i in range(current)]
+            
+            # Let it run for step duration
+            await asyncio.sleep(step_duration_sec)
+            
+            current += step
+    finally:
+        # Clean up all tasks
         for t in tasks:
             t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        current += step
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
 
 __all__ = ["ramp_up", "sustained", "spike", "stress"]

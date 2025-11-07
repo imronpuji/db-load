@@ -50,25 +50,62 @@ class QueryRunner:
     async def __call__(self, _idx: int) -> None:
         conn: Optional[asyncpg.Connection] = None
         t0 = time.perf_counter()
-        try:
-            conn = await asyncpg.connect(self.database_url, statement_cache_size=0)
-            t1 = time.perf_counter()
-            self.metrics.record_connect(t1 - t0, ok=True)
-            await conn.execute(f"SET statement_timeout = {self.statement_timeout_ms}")
-        except Exception:
-            t1 = time.perf_counter()
-            self.metrics.record_connect(t1 - t0, ok=False)
-            if conn:
-                await conn.close()
-            return
+        
+        # Try to connect with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                conn = await asyncpg.connect(
+                    self.database_url, 
+                    statement_cache_size=0,
+                    timeout=10,  # 10s connection timeout
+                    command_timeout=30  # 30s command timeout
+                )
+                t1 = time.perf_counter()
+                self.metrics.record_connect(t1 - t0, ok=True)
+                await conn.execute(f"SET statement_timeout = {self.statement_timeout_ms}")
+                break
+            except (ConnectionError, asyncpg.PostgresError, OSError) as e:
+                if attempt < max_retries - 1:
+                    # Exponential backoff
+                    await asyncio.sleep(0.5 * (2 ** attempt))
+                    continue
+                else:
+                    t1 = time.perf_counter()
+                    self.metrics.record_connect(t1 - t0, ok=False)
+                    if conn:
+                        try:
+                            await conn.close()
+                        except Exception:
+                            pass
+                    return
 
         try:
-            # Loop a handful of operations to simulate ongoing work per connection
-            for _ in range(20):
-                await self._execute_random_query(conn)
+            # Execute queries with rate limiting to avoid overwhelming DB
+            for i in range(30):  # Reduced from 50 to 30 for stability
+                try:
+                    await self._execute_random_query(conn)
+                    # Small delay every few queries to prevent overwhelming
+                    if i % 5 == 0:
+                        await asyncio.sleep(0.05)  # 50ms breather
+                except (ConnectionError, asyncpg.PostgresError) as e:
+                    # Connection lost during query execution - break out
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    # Log but continue with other queries
+                    pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
         finally:
             if conn:
-                await conn.close()
+                try:
+                    await conn.close()
+                except Exception:
+                    pass  # Suppress close errors
 
     async def _execute_random_query(self, conn: asyncpg.Connection) -> None:
         is_simple = random.random() < self.simple_weight
@@ -101,12 +138,21 @@ class QueryRunner:
             await conn.fetch(f"SELECT * FROM {self.table} LIMIT 1")
 
     async def _run_complex(self, conn: asyncpg.Connection) -> None:
-        # Aggregation and filtered scan with offset/limit
+        # More aggressive complex queries to stress the DB
+        # 1. COUNT aggregation
         await conn.fetchrow(f"SELECT COUNT(*) AS c FROM {self.table}")
-        offset = random.randint(0, 1000)
+        
+        # 2. Offset scan with larger range
+        offset = random.randint(0, 5000)
         await conn.fetch(
-            f"SELECT * FROM {self.table} OFFSET {offset} LIMIT 50"
+            f"SELECT * FROM {self.table} OFFSET {offset} LIMIT 100"
         )
+        
+        # 3. Additional aggregate if created_column exists
+        if self.created_column:
+            await conn.fetchrow(
+                f"SELECT COUNT(*), MAX({self.created_column}) FROM {self.table}"
+            )
 
 
 async def main() -> None:

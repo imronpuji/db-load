@@ -25,6 +25,14 @@ workload:
     step: 2000
     max_connections: 20000
     step_duration_sec: 60
+  stress_gentle:
+    # Gentle stress test optimized for Lightsail 8GB/2CPU
+    # Gradual ramp-up with auto-throttling and error detection
+    start_connections: 100    # Start small
+    step: 200                 # Increase by 200 each level
+    max_connections: 2000     # Max 2000 connections (will auto-stop if DB struggles)
+    step_duration_sec: 60     # Hold each level for 60s
+    ramp_up_time_sec: 30      # Take 30s to ramp up to each level (max 10 conn/s)
 
 queries:
   # We will auto-detect tables, prefer names containing 'event' or 'product'

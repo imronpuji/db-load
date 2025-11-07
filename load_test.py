@@ -16,7 +16,7 @@ from db_inspector import (
 from grafana_exporter import start_prometheus_exporter
 from metrics import MetricsCollector
 from reporter import Reporter
-from scenarios import ramp_up, spike, stress, sustained
+from scenarios import ramp_up, spike, stress, stress_gentle, sustained
 
 
 def load_config(path: str) -> Dict[str, Any]:
@@ -158,7 +158,7 @@ class QueryRunner:
 async def main() -> None:
     parser = argparse.ArgumentParser(description="PostgreSQL DB load tester")
     parser.add_argument("--config", default="config.yaml")
-    parser.add_argument("--scenario", choices=["ramp-up", "sustained", "spike", "stress"], default=None)
+    parser.add_argument("--scenario", choices=["ramp-up", "sustained", "spike", "stress", "stress-gentle"], default=None)
     parser.add_argument("--prometheus-port", type=int, default=None)
     args = parser.parse_args()
 
@@ -245,6 +245,15 @@ async def main() -> None:
                 step=int(workload["stress"]["step"]),
                 max_connections=int(workload["stress"]["max_connections"]),
                 step_duration_sec=int(workload["stress"]["step_duration_sec"]),
+                worker=runner,
+            )
+        elif scenario == "stress-gentle":
+            await stress_gentle(
+                start_connections=int(workload.get("stress_gentle", {}).get("start_connections", 100)),
+                step=int(workload.get("stress_gentle", {}).get("step", 100)),
+                max_connections=int(workload.get("stress_gentle", {}).get("max_connections", 1000)),
+                step_duration_sec=int(workload.get("stress_gentle", {}).get("step_duration_sec", 60)),
+                ramp_up_time_sec=int(workload.get("stress_gentle", {}).get("ramp_up_time_sec", 30)),
                 worker=runner,
             )
         else:
